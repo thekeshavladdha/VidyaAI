@@ -97,6 +97,10 @@ function statusForDoc(d: ApiDocument): "ready" | "processing" | "error" {
   return "processing";
 }
 
+function isDocQueryable(d: ApiDocument) {
+  return statusForDoc(d) === "ready" && (d.chunk_count ?? 0) > 0;
+}
+
 function dateStr(iso: string) {
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
@@ -239,7 +243,7 @@ function DashboardView({ navigate, quickPrompt, setQuickPrompt }: { navigate: (v
   }, []);
 
   const [selectedTopicId, setSelectedTopicId] = useState<string | null>(null);
-  const readyDocs = docs.filter(d => statusForDoc(d) === "ready").length;
+  const readyDocs = docs.filter(d => isDocQueryable(d)).length;
   const avgMastery = progress.length ? Math.round(progress.reduce((a, p) => a + p.mastery_score, 0) / progress.length) : 0;
   const selectedTopic = TOPIC_NODES.find(n => n.id === selectedTopicId) || null;
 
@@ -829,7 +833,7 @@ function ChatView({ quickPrompt, clearQuickPrompt }: { quickPrompt: string; clea
 
   useEffect(() => {
     fetchDocuments().then(d => {
-      const ready = d.filter(x => statusForDoc(x) === "ready");
+      const ready = d.filter(isDocQueryable);
       setDocs(ready);
       if (ready.length > 0 && !selectedDoc) setSelectedDoc(ready[0].id);
     }).catch(() => {});
@@ -1185,7 +1189,7 @@ function QuizView() {
     Promise.all([
       fetchQuizzes().then(setQuizzes),
       fetchDocuments().then(d => {
-        const ready = d.filter(x => statusForDoc(x) === "ready");
+        const ready = d.filter(isDocQueryable);
         setDocs(ready);
         if (ready.length > 0) setSelectedDocId(ready[0].id);
       }),

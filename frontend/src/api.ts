@@ -6,6 +6,7 @@ export interface ApiDocument {
   topic: string | null;
   topic_id: string | null;
   status: string;
+  chunk_count?: number;
   storage_path: string | null;
   user_id: string | null;
   created_at: string;
