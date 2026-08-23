@@ -87,19 +87,110 @@ export interface ApiFlashcard {
   topic_id?: string;
 }
 
+export interface ApiUser {
+  id: string;
+  email: string;
+  fullName: string;
+}
+
+export interface AuthResponse {
+  user: ApiUser | null;
+  token?: string;
+  error?: string;
+  isDemo?: boolean;
+}
+
 const DEMO_USER_ID = '00000000-0000-0000-0000-000000000001';
 
 export function getDemoUserId(): string {
-  return DEMO_USER_ID;
+  const user = getStoredAuthUser();
+  return user ? user.id : DEMO_USER_ID;
 }
 
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, options);
+export function getStoredToken(): string | null {
+  return localStorage.getItem('vidya_auth_token');
+}
+
+export function getStoredAuthUser(): ApiUser | null {
+  try {
+    const saved = localStorage.getItem('vidya_auth_user');
+    return saved ? JSON.parse(saved) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function setStoredAuth(user: ApiUser, token?: string) {
+  localStorage.setItem('vidya_auth_user', JSON.stringify(user));
+  if (token) localStorage.setItem('vidya_auth_token', token);
+}
+
+export function clearStoredAuth() {
+  localStorage.removeItem('vidya_auth_user');
+  localStorage.removeItem('vidya_auth_token');
+}
+
+async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const token = getStoredToken();
+  const headers = new Headers(options.headers || {});
+  if (token && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${token}`);
+  }
+
+  const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: res.statusText }));
     throw new Error(body.error || `Request failed: ${res.status}`);
   }
   return res.json();
+}
+
+// ── Auth API Functions ──
+
+export async function loginUser(email: string, password: string): Promise<AuthResponse> {
+  const res = await request<AuthResponse>('/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password }),
+  });
+  if (res.user) {
+    setStoredAuth(res.user, res.token);
+  }
+  return res;
+}
+
+export async function registerUser(email: string, password: string, fullName?: string): Promise<AuthResponse> {
+  const res = await request<AuthResponse>('/auth/register', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password, fullName }),
+  });
+  if (res.user) {
+    setStoredAuth(res.user, res.token);
+  }
+  return res;
+}
+
+export async function getCurrentUser(): Promise<ApiUser | null> {
+  const token = getStoredToken();
+  if (!token) return getStoredAuthUser();
+  try {
+    const res = await request<{ user: ApiUser }>('/auth/me');
+    if (res.user) {
+      setStoredAuth(res.user, token);
+      return res.user;
+    }
+  } catch {
+    clearStoredAuth();
+  }
+  return null;
+}
+
+export async function logoutUser(): Promise<void> {
+  try {
+    await request('/auth/logout', { method: 'POST' });
+  } catch (_) {}
+  clearStoredAuth();
 }
 
 // Documents

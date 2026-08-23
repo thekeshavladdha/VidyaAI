@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { TopicGraph, TOPIC_NODES } from "./TopicGraph";
+import { AuthPage } from "./AuthPage";
 import {
   fetchDocuments,
   uploadDocument,
@@ -24,6 +25,10 @@ import {
   clearDemoData,
   transcribeAudio,
   generateSpeech,
+  getStoredAuthUser,
+  getCurrentUser,
+  logoutUser,
+  type ApiUser,
   type ApiDocument,
   type ApiTopic,
   type ApiQuiz,
@@ -328,7 +333,7 @@ function DashboardView({ navigate, quickPrompt, setQuickPrompt }: { navigate: (v
             return (
               <div key={d.day} className="flex-1 flex flex-col items-center gap-2 group relative">
                 {/* Session count label above bar */}
-                <span className={`font-mono text-xs font-semibold ${isToday ? "text-cyan-400" : d.sessions > 0 ? "text-[#a1a1aa]" : "text-[#3f3f46]"}`}>
+                <span className={`font-mono text-xs font-semibold ${isToday ? "text-blue-400" : d.sessions > 0 ? "text-[#a1a1aa]" : "text-[#3f3f46]"}`}>
                   {d.sessions}
                 </span>
 
@@ -337,9 +342,9 @@ function DashboardView({ navigate, quickPrompt, setQuickPrompt }: { navigate: (v
                   <div
                     className={`w-full rounded-t transition-all duration-300 ${
                       isToday 
-                        ? "bg-cyan-400 shadow-[0_0_15px_rgba(34,211,238,0.4)]" 
+                        ? "bg-blue-600" 
                         : d.sessions > 0 
-                        ? "bg-indigo-600 group-hover:bg-indigo-500" 
+                        ? "bg-slate-700 group-hover:bg-slate-600" 
                         : "bg-[#27272a]/50"
                     }`}
                     style={{ height: `${Math.max(heightPct, d.sessions > 0 ? 10 : 4)}%` }}
@@ -347,7 +352,7 @@ function DashboardView({ navigate, quickPrompt, setQuickPrompt }: { navigate: (v
                 </div>
 
                 {/* Day label */}
-                <span className={`font-mono text-xs ${isToday ? "text-cyan-400 font-bold" : "text-[#71717a]"}`}>
+                <span className={`font-mono text-xs ${isToday ? "text-blue-400 font-bold" : "text-[#71717a]"}`}>
                   {d.day}
                 </span>
               </div>
@@ -2079,6 +2084,54 @@ export default function App() {
   const [demoSeeding, setDemoSeeding] = useState(false);
   const [demoMsg, setDemoMsg] = useState("");
 
+  // Auth State
+  const [user, setUser] = useState<ApiUser | null>(getStoredAuthUser());
+  const [isGuest, setIsGuest] = useState<boolean>(() => localStorage.getItem("vidya_is_guest") === "true");
+  const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
+
+  // Theme State (Dark / Light)
+  const [theme, setTheme] = useState<'dark' | 'light'>(() => {
+    const saved = (localStorage.getItem('vidya_theme') as 'dark' | 'light') || 'dark';
+    if (saved === 'light') {
+      document.documentElement.classList.add('light');
+      document.documentElement.classList.remove('dark');
+    } else {
+      document.documentElement.classList.add('dark');
+      document.documentElement.classList.remove('light');
+    }
+    return saved;
+  });
+
+  const toggleTheme = () => {
+    const next = theme === 'dark' ? 'light' : 'dark';
+    setTheme(next);
+    localStorage.setItem('vidya_theme', next);
+    if (next === 'light') {
+      document.documentElement.classList.add('light');
+      document.documentElement.classList.remove('dark');
+    } else {
+      document.documentElement.classList.add('dark');
+      document.documentElement.classList.remove('light');
+    }
+  };
+
+  useEffect(() => {
+    getCurrentUser().then(u => {
+      if (u) {
+        setUser(u);
+        setIsGuest(false);
+      }
+    });
+  }, []);
+
+  const handleSignOut = async () => {
+    await logoutUser();
+    setUser(null);
+    setIsGuest(false);
+    localStorage.removeItem("vidya_is_guest");
+    setProfileDropdownOpen(false);
+  };
+
   async function handleLoadDemo() {
     if (demoSeeding) return;
     setDemoSeeding(true);
@@ -2088,7 +2141,6 @@ export default function App() {
       const s = result.stats;
       setDemoMsg(`✓ ${s.documentsCount} docs, ${s.chunksCount} chunks, ${s.quizzesCount} quizzes`);
       setTimeout(() => setDemoMsg(""), 6000);
-      // Refresh current view
       setView(v => v === "dashboard" ? "dashboard" : v);
     } catch (e: unknown) {
       setDemoMsg(e instanceof Error ? e.message : "Seed failed — check API keys in Settings");
@@ -2098,26 +2150,40 @@ export default function App() {
     }
   }
 
+  if (!user && !isGuest) {
+    return (
+      <AuthPage
+        onSuccess={(u, isDemo) => {
+          setUser(u);
+          if (isDemo) setIsGuest(true);
+        }}
+        onContinueAsGuest={() => {
+          setIsGuest(true);
+          localStorage.setItem("vidya_is_guest", "true");
+        }}
+      />
+    );
+  }
+
   return (
-    <div className="w-full h-screen flex bg-[#09090b] text-[#f4f4f5] overflow-hidden" style={{ fontFamily: "'Inter', system-ui, sans-serif" }}>
+    <div className={`w-full h-screen flex bg-[#09090b] text-[#f4f4f5] overflow-hidden ${theme}`} style={{ fontFamily: "'Inter', system-ui, sans-serif" }}>
       {/* Sidebar */}
       <aside
         className={`flex flex-col border-r border-[#27272a] bg-[#121215] transition-all duration-300 shrink-0 ${sidebarOpen ? "w-60" : "w-16"}`}
       >
         {/* Logo */}
         <div className="flex items-center gap-3 px-4 py-5 border-b border-[#27272a]">
-          <div className="w-8 h-8 rounded-xl bg-indigo-600 flex items-center justify-center shrink-0 relative shadow-[0_0_15px_rgba(99,102,241,0.4)]">
+          <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center shrink-0">
             <svg width="16" height="16" viewBox="0 0 32 32" fill="none">
               <path d="M16 6L8 11l8 5 8-5-8-5z" fill="#fff" opacity="0.9"/>
               <path d="M8 16l8 5 8-5" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
               <path d="M8 20l8 5 8-5" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none" opacity="0.5"/>
             </svg>
-            <div className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-emerald-400 border-2 border-[#121215] animate-pulse" />
           </div>
           {sidebarOpen && (
             <div className="overflow-hidden">
               <span className="font-mono font-bold text-sm text-[#f4f4f5] tracking-tight whitespace-nowrap block">VidyaAI</span>
-              <span className="block text-[10px] font-mono text-indigo-400 uppercase tracking-widest whitespace-nowrap">Study Studio</span>
+              <span className="block text-[10px] font-mono text-slate-400 uppercase tracking-widest whitespace-nowrap">Study Studio</span>
             </div>
           )}
         </div>
@@ -2133,13 +2199,13 @@ export default function App() {
                 title={!sidebarOpen ? item.label : undefined}
                 className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-all duration-150 text-left relative group
                   ${active 
-                    ? "bg-indigo-500/15 border-l-2 border-indigo-500 text-indigo-300 font-semibold shadow-[0_0_15px_rgba(99,102,241,0.15)]" 
+                    ? "bg-slate-800 border-l-2 border-blue-500 text-white font-semibold" 
                     : "text-[#71717a] hover:bg-[#1a1a1e] hover:text-[#d4d4d8] border-l-2 border-transparent"}
                   ${!sidebarOpen ? "justify-center px-0" : ""}`}
               >
-                <span className={`shrink-0 transition-colors ${active ? "text-indigo-400" : "group-hover:text-[#f4f4f5]"}`}>{item.icon}</span>
+                <span className={`shrink-0 transition-colors ${active ? "text-blue-400" : "group-hover:text-[#f4f4f5]"}`}>{item.icon}</span>
                 {sidebarOpen && <span className="font-mono text-xs truncate tracking-wide">{item.label}</span>}
-                {active && sidebarOpen && <span className="ml-auto w-1.5 h-1.5 rounded-full bg-indigo-400 shadow-[0_0_8px_rgba(99,102,241,0.8)] shrink-0" />}
+                {active && sidebarOpen && <span className="ml-auto w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0" />}
               </button>
             );
           })}
@@ -2224,8 +2290,51 @@ export default function App() {
             >
               {Icon.quiz} Generate Quiz
             </button>
-            <div className="w-8 h-8 rounded-xl bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center text-indigo-300 font-mono font-bold text-xs ml-1 shadow-sm">
-              S
+
+            {/* Dark / Light Theme Toggle Button */}
+            <button
+              onClick={toggleTheme}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-[#27272a] bg-[#1a1a1e] text-xs font-mono text-[#d4d4d8] hover:text-white transition-all cursor-pointer shadow-sm"
+              title="Toggle Dark / Light Mode"
+            >
+              {theme === 'dark' ? '☀️ Light' : '🌙 Dark'}
+            </button>
+            
+            {/* User Profile Menu */}
+            <div className="relative ml-1">
+              <button
+                onClick={() => setProfileDropdownOpen(o => !o)}
+                className="flex items-center gap-2 p-1.5 rounded-xl border border-[#27272a] bg-[#1a1a1e] hover:border-indigo-500/40 transition-all cursor-pointer shadow-sm"
+                title="User Profile Menu"
+              >
+                <div className="w-7 h-7 rounded-lg bg-indigo-600/30 border border-indigo-500/40 flex items-center justify-center text-indigo-300 font-mono font-bold text-xs">
+                  {user ? user.fullName.charAt(0).toUpperCase() : "G"}
+                </div>
+                <span className="font-mono text-xs text-[#f4f4f5] max-w-[100px] truncate hidden sm:inline-block">
+                  {user ? user.fullName.split(" ")[0] : "Guest"}
+                </span>
+                <span className="text-[#71717a] text-[10px] pr-1">▼</span>
+              </button>
+
+              {profileDropdownOpen && (
+                <div className="absolute right-0 top-full mt-2 w-60 bg-[#18181b] border border-[#27272a] rounded-xl shadow-2xl p-3 z-50 animate-in fade-in">
+                  <div className="px-2 py-1.5 border-b border-[#27272a] mb-2">
+                    <p className="font-mono text-xs font-bold text-white truncate">{user ? user.fullName : "Guest Explorer"}</p>
+                    <p className="font-mono text-[10px] text-[#71717a] truncate">{user ? user.email : "guest@vidyaai.app"}</p>
+                    <span className={`inline-block text-[9px] font-mono px-2 py-0.5 rounded-full mt-2 ${isGuest ? "bg-amber-500/15 text-amber-400 border border-amber-500/30" : "bg-emerald-500/15 text-emerald-400 border border-emerald-500/30"}`}>
+                      {isGuest ? "⚡ Demo Mode" : "● Supabase Auth"}
+                    </span>
+                  </div>
+
+                  <button
+                    onClick={handleSignOut}
+                    className="w-full text-left px-2.5 py-2 rounded-lg text-xs font-mono text-rose-400 hover:bg-rose-500/10 transition-colors flex items-center gap-2"
+                  >
+                    <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l3 3m0 0l-3 3m3-3H2.25" /></svg>
+                    Sign Out / Auth Page
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </header>

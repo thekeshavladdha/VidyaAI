@@ -190,6 +190,118 @@ async function callGroq(systemPrompt, userPrompt) {
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
 
+// ── Auth Endpoints ──
+
+// POST /api/auth/register
+app.post('/api/auth/register', async (req, res) => {
+  const { email, password, fullName } = req.body || {};
+  if (!email || !password) {
+    return res.status(400).json({ error: 'Email and password are required' });
+  }
+
+  try {
+    if (process.env.SUPABASE_URL && process.env.SUPABASE_KEY && process.env.SUPABASE_URL !== 'https://your-project.supabase.co') {
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: { data: { full_name: fullName || email.split('@')[0] } },
+      });
+      if (error) throw error;
+      const user = data.user ? {
+        id: data.user.id,
+        email: data.user.email,
+        fullName: data.user.user_metadata?.full_name || fullName || email.split('@')[0],
+      } : null;
+      return res.json({ user, token: data.session?.access_token || 'demo_token' });
+    }
+
+    // Demo Mode Auth fallback
+    const user = {
+      id: 'usr_' + Date.now(),
+      email,
+      fullName: fullName || email.split('@')[0],
+    };
+    return res.json({ user, token: 'demo_token_' + Date.now(), isDemo: true });
+  } catch (err) {
+    console.error('Registration error:', err);
+    return res.status(400).json({ error: err.message || 'Registration failed' });
+  }
+});
+
+// POST /api/auth/login
+app.post('/api/auth/login', async (req, res) => {
+  const { email, password } = req.body || {};
+  if (!email || !password) {
+    return res.status(400).json({ error: 'Email and password are required' });
+  }
+
+  try {
+    if (process.env.SUPABASE_URL && process.env.SUPABASE_KEY && process.env.SUPABASE_URL !== 'https://your-project.supabase.co') {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+      if (error) throw error;
+      const user = data.user ? {
+        id: data.user.id,
+        email: data.user.email,
+        fullName: data.user.user_metadata?.full_name || email.split('@')[0],
+      } : null;
+      return res.json({ user, token: data.session?.access_token });
+    }
+
+    // Demo Mode Auth fallback
+    const user = {
+      id: 'usr_' + Date.now(),
+      email,
+      fullName: email.split('@')[0],
+    };
+    return res.json({ user, token: 'demo_token_' + Date.now(), isDemo: true });
+  } catch (err) {
+    console.error('Login error:', err);
+    return res.status(401).json({ error: err.message || 'Invalid email or password' });
+  }
+});
+
+// GET /api/auth/me
+app.get('/api/auth/me', async (req, res) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  const token = authHeader.split(' ')[1];
+
+  try {
+    if (process.env.SUPABASE_URL && process.env.SUPABASE_KEY && process.env.SUPABASE_URL !== 'https://your-project.supabase.co') {
+      const { data: { user }, error } = await supabase.auth.getUser(token);
+      if (error || !user) throw new Error('Invalid session');
+      return res.json({
+        user: {
+          id: user.id,
+          email: user.email,
+          fullName: user.user_metadata?.full_name || user.email.split('@')[0],
+        }
+      });
+    }
+
+    return res.json({
+      user: { id: 'demo_user', email: 'guest@vidyaai.app', fullName: 'Guest Explorer' }
+    });
+  } catch (err) {
+    return res.status(401).json({ error: 'Session expired' });
+  }
+});
+
+// POST /api/auth/logout
+app.post('/api/auth/logout', async (req, res) => {
+  try {
+    if (process.env.SUPABASE_URL && process.env.SUPABASE_KEY) {
+      await supabase.auth.signOut().catch(() => {});
+    }
+  } catch (_) {}
+  return res.json({ message: 'Signed out successfully' });
+});
+
 // POST /api/ingest
 app.post('/api/ingest', upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });

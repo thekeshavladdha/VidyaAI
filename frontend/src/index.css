@@ -1,5 +1,5 @@
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap');
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
 @import 'tailwindcss';
 
@@ -8,34 +8,42 @@
   --font-mono: 'JetBrains Mono', Consolas, monospace;
 }
 
-:root {
-  --background: #18181b;
-  --foreground: #fafafa;
-  --card: #27272a;
-  --card-foreground: #f4f4f5;
-  --surface: #3f3f46;
-  --primary: #6366f1;
-  --primary-foreground: #ffffff;
-  --secondary: #22c55e;
-  --secondary-foreground: #ffffff;
-  --muted: #3f3f46;
-  --muted-foreground: #a1a1aa;
-  --accent: #818cf8;
-  --border: #3f3f46;
-  --ring: #6366f1;
-  --warning: #f59e0b;
-  --error: #ef4444;
-  --radius: 0.375rem;
+:root, .dark {
+  /* Simple Sober Dark Palette */
+  --background: #0f172a;
+  --foreground: #f8fafc;
+  --card: #1e293b;
+  --card-foreground: #f1f5f9;
+  --surface: #334155;
+  --primary: #2563eb;
+  --primary-hover: #1d4ed8;
+  --muted: #334155;
+  --muted-foreground: #94a3b8;
+  --border: #334155;
+}
+
+.light {
+  /* Google Gemini Light Theme Tokens */
+  --background: #f0f4f9;
+  --foreground: #1f1f1f;
+  --card: #ffffff;
+  --card-foreground: #1f1f1f;
+  --surface: #e9eef6;
+  --primary: #0b57d0;
+  --primary-hover: #0842a0;
+  --muted: #e1e3e1;
+  --muted-foreground: #444746;
+  --border: #e3e3e3;
 }
 
 * {
   scrollbar-width: thin;
-  scrollbar-color: #3f3f46 transparent;
+  scrollbar-color: var(--border) transparent;
 }
 
 *::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
 }
 
 *::-webkit-scrollbar-track {
@@ -43,7 +51,7 @@
 }
 
 *::-webkit-scrollbar-thumb {
-  background: #3f3f46;
+  background: var(--border);
   border-radius: 3px;
 }
 
@@ -52,4 +60,207 @@ body {
   background-color: var(--background);
   color: var(--foreground);
   -webkit-font-smoothing: antialiased;
+}
+
+/* =====================================================================
+   Google Gemini Light Theme Overrides (High Specificity)
+   ===================================================================== */
+.light,
+.light body,
+.light #root,
+.light .app-layout,
+.light main {
+  background-color: #f0f4f9 !important;
+  color: #1f1f1f !important;
+}
+
+.light [class*="bg-\[\#09090b\]"],
+.light [class*="bg-\[\#0e0f12\]"],
+.light [class*="bg-\[\#0f172a\]"] {
+  background-color: #f0f4f9 !important;
+  color: #1f1f1f !important;
+}
+
+.light [class*="bg-\[\#121215\]"],
+.light [class*="bg-\[\#18181b\]"],
+.light [class*="bg-\[\#1e293b\]"],
+.light [class*="bg-\[\#171717\]"],
+.light [class*="bg-\[\#1c1c1e\]"] {
+  background-color: #ffffff !important;
+  color: #1f1f1f !important;
+  border-color: #e3e3e3 !important;
+}
+
+.light [class*="bg-\[\#1a1a1e\]"],
+.light [class*="bg-\[\#1a1a24\]"],
+.light [class*="bg-\[\#16161a\]"],
+.light [class*="bg-\[\#27272a\]"],
+.light [class*="bg-\[\#334155\]"] {
+  background-color: #ffffff !important;
+  color: #1f1f1f !important;
+  border-color: #e3e3e3 !important;
+}
+
+/* Gemini Sidebar Styling */
+.light aside {
+  background-color: #f0f4f9 !important;
+  border-right-color: #e3e3e3 !important;
+}
+
+.light header {
+  background-color: #ffffff !important;
+  border-bottom-color: #e3e3e3 !important;
+}
+
+.light nav button.bg-slate-800,
+.light nav button[class*="bg-indigo-500"] {
+  background-color: #d3e3fd !important;
+  color: #041e49 !important;
+  border-left-color: #0b57d0 !important;
+}
+
+.light [class*="border-\[\#27272a\]"],
+.light [class*="border-\[\#334155\]"],
+.light [class*="border-\[\#2f2f2f\]"],
+.light [class*="border-\[\#3f3f46\]"] {
+  border-color: #e3e3e3 !important;
+}
+
+/* Typography Visibility Overrides */
+.light h1, .light h2, .light h3, .light h4, .light h5, .light h6,
+.light p, .light span, .light div, .light td, .light th, .light label, .light a {
+  color: inherit;
+}
+
+.light [class*="text-\[\#f4f4f5\]"],
+.light [class*="text-\[\#ececf1\]"],
+.light [class*="text-white"],
+.light [class*="text-slate-100"],
+.light [class*="text-zinc-100"] {
+  color: #1f1f1f !important;
+}
+
+.light [class*="text-\[\#a1a1aa\]"],
+.light [class*="text-\[\#71717a\]"],
+.light [class*="text-\[\#94a3b8\]"],
+.light [class*="text-\[\#64748b\]"],
+.light [class*="text-\[\#52525b\]"],
+.light [class*="text-\[\#3f3f46\]"] {
+  color: #444746 !important;
+}
+
+.light .text-indigo-400,
+.light .text-indigo-300 {
+  color: #0b57d0 !important;
+}
+
+.light [class*="bg-indigo-500\/10"],
+.light [class*="bg-indigo-600\/10"],
+.light [class*="bg-indigo-500\/15"],
+.light [class*="bg-indigo-500\/20"] {
+  background-color: #e9eef6 !important;
+  color: #041e49 !important;
+  border-color: #d3e3fd !important;
+}
+
+.light table {
+  background-color: #ffffff !important;
+  border-color: #e3e3e3 !important;
+}
+
+.light tr {
+  border-bottom-color: #e3e3e3 !important;
+}
+
+.light th {
+  background-color: #f0f4f9 !important;
+  color: #444746 !important;
+}
+
+.light tr:hover {
+  background-color: #f8fafd !important;
+}
+
+/* Inputs & Form Controls */
+.light input,
+.light select,
+.light textarea {
+  background-color: #ffffff !important;
+  color: #1f1f1f !important;
+  border-color: #c4c7c5 !important;
+}
+
+.light input::placeholder,
+.light textarea::placeholder {
+  color: #747775 !important;
+}
+
+.light input:focus,
+.light select:focus,
+.light textarea:focus {
+  border-color: #0b57d0 !important;
+  outline: 2px solid #d3e3fd !important;
+}
+
+/* =====================================================================
+   Light Theme Hover Overrides (Light Grey Hover, Never Black/Dark)
+   ===================================================================== */
+.light button:hover,
+.light a:hover,
+.light [role="button"]:hover,
+.light [class*="hover\:bg-\[\#1a1a1e\]"]:hover,
+.light [class*="hover\:bg-\[\#1a1a24\]"]:hover,
+.light [class*="hover\:bg-\[\#16161a\]"]:hover,
+.light [class*="hover\:bg-\[\#27272a\]"]:hover,
+.light [class*="hover\:bg-\[\#18181c\]"]:hover,
+.light [class*="hover\:bg-slate-800"]:hover,
+.light [class*="hover\:bg-indigo-500\/10"]:hover,
+.light [class*="hover\:bg-indigo-600\/20"]:hover {
+  background-color: #e2e8f0 !important;
+  color: #1f1f1f !important;
+  border-color: #cbd5e1 !important;
+}
+
+.light nav button:hover {
+  background-color: #e2e8f0 !important;
+  color: #1f1f1f !important;
+}
+
+.light nav button.bg-slate-800,
+.light nav button[class*="bg-indigo-500"] {
+  background-color: #d3e3fd !important;
+  color: #041e49 !important;
+  border-left-color: #0b57d0 !important;
+}
+
+.light nav button.bg-slate-800:hover,
+.light nav button[class*="bg-indigo-500"]:hover {
+  background-color: #c2d9fc !important;
+  color: #041e49 !important;
+}
+
+/* Primary Filled Buttons (Blue) Stay Blue on Hover */
+.light button.bg-blue-600,
+.light button.bg-indigo-600,
+.light .btn-primary-auth {
+  background-color: #0b57d0 !important;
+  color: #ffffff !important;
+}
+
+.light button.bg-blue-600:hover,
+.light button.bg-indigo-600:hover,
+.light button[class*="bg-blue-600"]:hover,
+.light button[class*="bg-indigo-600"]:hover,
+.light .btn-primary-auth:hover {
+  background-color: #0842a0 !important;
+  color: #ffffff !important;
+}
+
+/* Remove AI glows */
+.shadow-glow, [class*="shadow-"] {
+  box-shadow: none !important;
+}
+
+.animate-pulse {
+  animation: none !important;
 }
