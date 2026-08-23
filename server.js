@@ -148,17 +148,159 @@ async function embedQuery(text) {
 }
 
 function chunkText(text, chunkSize = 700, overlapPct = 15) {
-  const chunks = [];
-  const overlap = Math.floor(chunkSize * (overlapPct / 100));
-  let start = 0;
-  while (start < text.length) {
-    const end = Math.min(start + chunkSize, text.length);
-    chunks.push(text.slice(start, end));
-    if (end >= text.length) break;
-    start = end - overlap;
-    if (start <= chunks[chunks.length - 1].length) start = end;
+  // Hybrid paragraph-aware chunking:
+  // 1. Split by paragraphs (double newline)
+  // 2. Merge tiny paragraphs (< minParaSize)
+  // 3. Split large paragraphs (> maxParaSize) with sliding window
+  // 4. Add sentence-level overlap at boundaries
+
+  const minParaSize = 200;
+  const maxParaSize = 1200;
+  const overlapChars = Math.floor(chunkSize * (overlapPct / 100));
+
+  // Split into paragraphs (preserve blank lines as delimiters)
+  const rawParagraphs = text.split(/\n\s*\n/).map(p => p.trim()).filter(p => p.length > 0);
+
+  // Merge tiny paragraphs with neighbors
+  const paragraphs = [];
+  for (const para of rawParagraphs) {
+    if (paragraphs.length > 0 && para.length < minParaSize && paragraphs[paragraphs.length - 1].length < maxParaSize) {
+      paragraphs[paragraphs.length - 1] += '\n\n' + para;
+    } else {
+      paragraphs.push(para);
+    }
   }
+
+  // Now split large paragraphs with sliding window
+  const chunks = [];
+  for (const para of paragraphs) {
+    if (para.length <= maxParaSize) {
+      chunks.push(para);
+    } else {
+      // Sliding window for large paragraphs
+      let start = 0;
+      while (start < para.length) {
+        const end = Math.min(start + chunkSize, para.length);
+        let chunk = para.slice(start, end);
+
+        // Try to end at sentence boundary
+        if (end < para.length) {
+          const lastPeriod = chunk.lastIndexOf('. ');
+          const lastQMark = chunk.lastIndexOf('? ');
+          const lastExcl = chunk.lastIndexOf('! ');
+          const sentenceEnd = Math.max(lastPeriod, lastQMark, lastExcl);
+          if (sentenceEnd > chunkSize * 0.5) {
+            chunk = chunk.slice(0, sentenceEnd + 1);
+            start += sentenceEnd + 1;
+          } else {
+            start = end;
+          }
+        } else {
+          start = end;
+        }
+        chunks.push(chunk.trim());
+      }
+    }
+  }
+
+  // Add sentence-level overlap between consecutive chunks
+  if (chunks.length > 1 && overlapChars > 0) {
+    const overlapped = [chunks[0]];
+    for (let i = 1; i < chunks.length; i++) {
+      const prevSentences = chunks[i - 1].match(/[^.!?]+[.!?]+/g) || [];
+      const overlapText = prevSentences.slice(-2).join(' ').slice(-overlapChars);
+      if (overlapText.length > 50) {
+        overlapped.push(overlapText + ' ' + chunks[i]);
+      } else {
+        overlapped.push(chunks[i]);
+      }
+    }
+    return overlapped;
+  }
+
   return chunks;
+}
+
+// ─── Advanced RAG Pipeline (Approach B) ─────────────────────────────────────────
+
+async function rewriteQuery(originalQuery) {
+  const client = getGroqClient();
+  if (!client) return originalQuery;
+
+  const systemPrompt = `You are a search query optimizer for a CS education RAG system.
+Rewrite the user's query into a detailed search query containing the concepts, entities, terminology, and constraints that would help retrieve relevant documents.
+Do not answer the question or introduce facts not present in the query.
+Return ONLY the rewritten query, no explanations or formatting.`;
+
+  const userPrompt = `Original query: "${originalQuery}"
+
+Rewritten search query:`;
+
+  try {
+    const response = await client.chat.completions.create({
+      model: getSettings().groqModel || process.env.GROQ_MODEL || 'openai/gpt-oss-120b',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      temperature: 0.2,
+      max_tokens: 200,
+    });
+    const rewritten = response.choices[0].message.content?.trim();
+    return rewritten || originalQuery;
+  } catch (err) {
+    console.warn('Query rewrite failed, using original:', err.message);
+    return originalQuery;
+  }
+}
+
+async function rerankChunks(query, chunks, topK = 5) {
+  if (!chunks || chunks.length === 0) return [];
+  if (chunks.length <= topK) return chunks;
+
+  const client = getGroqClient();
+  if (!client) return chunks.slice(0, topK);
+
+  const chunksText = chunks
+    .map((c, i) => `[${i + 1}] ${c.content}`)
+    .join('\n\n---\n\n');
+
+  const systemPrompt = `You are a relevance ranker for a CS education RAG system.
+Given a query and a list of retrieved text chunks, rank them by relevance to the query.
+Return ONLY a JSON array of indices (1-based) in order of relevance, most relevant first.
+Example: [3, 1, 5, 2, 4]`;
+
+  const userPrompt = `Query: "${query}"
+
+Chunks:
+${chunksText}
+
+Return the top ${topK} most relevant chunk indices as a JSON array:`;
+
+  try {
+    const response = await client.chat.completions.create({
+      model: getSettings().groqModel || process.env.GROQ_MODEL || 'openai/gpt-oss-120b',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      temperature: 0.1,
+      max_tokens: 100,
+    });
+    const raw = response.choices[0].message.content?.trim();
+    const jsonMatch = raw?.match(/\[[\s\S]*\]/);
+    const indices = jsonMatch ? JSON.parse(jsonMatch[0]) : JSON.parse(raw || '[]');
+    
+    if (Array.isArray(indices) && indices.length > 0) {
+      return indices
+        .filter(i => i >= 1 && i <= chunks.length)
+        .slice(0, topK)
+        .map(i => chunks[i - 1]);
+    }
+  } catch (err) {
+    console.warn('Reranking failed, using original order:', err.message);
+  }
+  return chunks.slice(0, topK);
 }
 
 function autoChunkParams(textLen, baseSize = 700, baseOverlap = 15) {
@@ -443,73 +585,98 @@ app.post('/api/topics', async (req, res) => {
 
 // POST /api/search
 app.post('/api/search', async (req, res) => {
-  const { query, documentId } = req.body;
+  const { query, documentId, useAdvanced = true } = req.body;
   if (!query) return res.status(400).json({ error: 'Query is required' });
 
   try {
-    const queryEmbedding = await embedQuery(query);
+    // Step 1: Query Rewrite (if advanced mode)
+    let searchQuery = query;
+    if (useAdvanced) {
+      searchQuery = await rewriteQuery(query);
+      console.log(`Query rewritten: "${query}" -> "${searchQuery}"`);
+    }
+
+    // Step 2: Embedding + Retrieve Top 20-30
+    const queryEmbedding = await embedQuery(searchQuery);
+    const retrievalCount = useAdvanced ? 25 : 5;
     const { data: chunks, error } = await supabase.rpc('match_chunks', {
       query_embedding: queryEmbedding,
-      match_threshold: 0.5,
-      match_count: 5,
+      match_threshold: 0.0,
+      match_count: retrievalCount,
       filter_document_id: documentId,
     });
     if (error) throw error;
-    res.json({ chunks });
+
+    // Step 3: Rerank to Top 5 (if advanced mode)
+    let finalChunks = chunks || [];
+    if (useAdvanced && finalChunks.length > 5) {
+      finalChunks = await rerankChunks(query, finalChunks, 5);
+    } else {
+      finalChunks = finalChunks.slice(0, 5);
+    }
+
+    res.json({ chunks: finalChunks });
   } catch (err) {
     console.error('Search error:', err);
     res.status(500).json({ error: err.message });
   }
 });
 
-// ─── POST /api/chat: RAG chat with Groq ──────────────────────────────────────
+// ─── POST /api/chat: RAG chat with Groq (Advanced Pipeline) ────────────────────
 
 app.post('/api/chat', async (req, res) => {
-  const { query, documentId } = req.body;
+  const { query, documentId, useAdvanced = true } = req.body;
   if (!query) return res.status(400).json({ error: 'Query is required' });
 
   try {
-    let chunks = [];
-    let searchError = null;
-
-    try {
-      const queryEmbedding = await embedQuery(query);
-      // Lower match threshold to 0.0 so top relevant chunks are retrieved reliably
-      const threshold = 0.0;
-      const result = await supabase.rpc('match_chunks', {
-        query_embedding: queryEmbedding,
-        match_threshold: threshold,
-        match_count: 5,
-        filter_document_id: documentId || null,
-      });
-      if (result.error) searchError = result.error;
-      else chunks = result.data || [];
-    } catch (e) {
-      searchError = e;
+    // Step 1: Query Rewrite (if advanced mode)
+    let searchQuery = query;
+    if (useAdvanced) {
+      searchQuery = await rewriteQuery(query);
+      console.log(`Chat query rewritten: "${query}" -> "${searchQuery}"`);
     }
 
+    // Step 2: Embedding + Retrieve Top 25
+    const queryEmbedding = await embedQuery(searchQuery);
+    const retrievalCount = useAdvanced ? 25 : 5;
+    const { data: chunks, error: searchError } = await supabase.rpc('match_chunks', {
+      query_embedding: queryEmbedding,
+      match_threshold: 0.0,
+      match_count: retrievalCount,
+      filter_document_id: documentId || null,
+    });
+
+    let retrievedChunks = chunks || [];
     if (searchError) {
       console.warn('Vector search failed (schema may need migration):', searchError.message);
     }
 
-    // If still no chunks, grab the first few chunks from the DB as fallback
-    if (!chunks || chunks.length === 0) {
+    // Fallback if no chunks
+    if (!retrievedChunks || retrievedChunks.length === 0) {
       let queryBuilder = supabase.from('chunks').select('content').limit(3);
       if (documentId) queryBuilder = queryBuilder.eq('document_id', documentId);
       const { data: fallbackChunks } = await queryBuilder;
       if (fallbackChunks && fallbackChunks.length > 0) {
-        chunks = fallbackChunks.map(c => ({ content: c.content, similarity: 1.0 }));
+        retrievedChunks = fallbackChunks.map(c => ({ content: c.content, similarity: 1.0 }));
       }
     }
 
-    if (!chunks || chunks.length === 0) {
+    // Step 3: Rerank to Top 5 (if advanced mode)
+    let finalChunks = retrievedChunks;
+    if (useAdvanced && finalChunks.length > 5) {
+      finalChunks = await rerankChunks(query, finalChunks, 5);
+    } else {
+      finalChunks = finalChunks.slice(0, 5);
+    }
+
+    if (!finalChunks || finalChunks.length === 0) {
       const systemPrompt = `You are VidyaAI, a helpful CS study teacher. Answer the student's question clearly and concisely. Use standard markdown formatting. When presenting structured data, comparisons, or components, ALWAYS format them using proper GFM markdown tables (| Col 1 | Col 2 |\n| --- | --- |). If you're unsure, say so.`;
       const userPrompt = query;
       const answer = await callGroq(systemPrompt, userPrompt);
       return res.json({ answer, citations: [] });
     }
 
-    const context = chunks
+    const context = finalChunks
       .map((c, i) => `[Source ${i + 1}]\n${c.content}`)
       .join('\n\n---\n\n');
 
@@ -520,7 +687,7 @@ app.post('/api/chat', async (req, res) => {
     const answer = await callGroq(systemPrompt, userPrompt);
 
     // Return the source citations used to generate the answer
-    const citations = chunks
+    const citations = finalChunks
       .slice(0, 3)
       .map((c) => ({
         snippet: c.content.slice(0, 250) + (c.content.length > 250 ? '...' : ''),

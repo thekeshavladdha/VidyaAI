@@ -229,11 +229,11 @@ export async function createTopic(name: string, description?: string): Promise<A
 }
 
 // Search (RAG)
-export async function searchChunks(query: string, documentId?: string): Promise<{ chunks: ApiSearchResult[] }> {
+export async function searchChunks(query: string, documentId?: string, useAdvanced = true): Promise<{ chunks: ApiSearchResult[] }> {
   return request<{ chunks: ApiSearchResult[] }>('/search', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query, documentId }),
+    body: JSON.stringify({ query, documentId, useAdvanced }),
   });
 }
 
@@ -243,11 +243,11 @@ export interface ApiChatResponse {
   citations: { snippet: string; similarity: number }[];
 }
 
-export async function chatWithAI(query: string, documentId?: string): Promise<ApiChatResponse> {
+export async function chatWithAI(query: string, documentId?: string, useAdvanced = true): Promise<ApiChatResponse> {
   return request<ApiChatResponse>('/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query, documentId }),
+    body: JSON.stringify({ query, documentId, useAdvanced }),
   });
 }
 
