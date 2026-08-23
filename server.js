@@ -136,7 +136,17 @@ async function generateEmbeddings(textChunks) {
   }
   const embeddings = [];
   for (const chunk of textChunks) {
-    embeddings.push(await googleEmbed(chunk));
+    try {
+      embeddings.push(await googleEmbed(chunk));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes('429') || msg.includes('quota') || msg.includes('RESOURCE_EXHAUSTED')) {
+        console.warn('Google embedding quota exceeded — falling back to placeholder embeddings for remaining chunks');
+        embeddings.push(placeholderEmbedding(chunk));
+      } else {
+        throw err;
+      }
+    }
   }
   return embeddings;
 }
@@ -144,7 +154,16 @@ async function generateEmbeddings(textChunks) {
 async function embedQuery(text) {
   const hasKey = !!(getSettings().googleApiKey || process.env.GOOGLE_API_KEY);
   if (!hasKey) return placeholderEmbedding(text);
-  return googleEmbed(text);
+  try {
+    return await googleEmbed(text);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes('429') || msg.includes('quota') || msg.includes('RESOURCE_EXHAUSTED')) {
+      console.warn('Google embedding quota exceeded for query — using placeholder embedding');
+      return placeholderEmbedding(text);
+    }
+    throw err;
+  }
 }
 
 function chunkText(text, chunkSize = 700, overlapPct = 15) {
@@ -492,13 +511,16 @@ app.post('/api/ingest', upload.single('file'), async (req, res) => {
       if (docErr) throw docErr;
       docId = doc.id;
     }
+    console.log('Ingest: docId=', docId, 'topicId=', resolvedTopicId);
 
     const rawText = await extractText(req.file.path);
     const text = sanitizeForPostgres(rawText);
+    console.log('Ingest: extracted text length:', text.length);
     const adaptive = autoChunkParams(text.length, chunkSize, chunkOverlap);
     const chunks = chunkText(text, adaptive.chunkSize, adaptive.chunkOverlap).map(c => sanitizeForPostgres(c));
     console.log(`Ingest: ${text.length} chars -> chunkSize=${adaptive.chunkSize} overlap=${adaptive.chunkOverlap}% -> ${chunks.length} chunks`);
     const embeddings = await generateEmbeddings(chunks);
+    console.log('Ingest: generated embeddings:', embeddings.length);
 
     const sanitizedTitle = sanitizeForPostgres(req.file.originalname || 'Untitled');
     // Update title if it contained null bytes (rare)
@@ -506,15 +528,17 @@ app.post('/api/ingest', upload.single('file'), async (req, res) => {
       await supabase.from('documents').update({ title: sanitizedTitle }).eq('id', docId);
     }
 
-    const { error } = await supabase.from('chunks').insert(
-      chunks.map((chunk, i) => ({
-        content: chunk,
-        embedding: embeddings[i],
-        document_id: docId,
-        topic_id: resolvedTopicId,
-      }))
-    );
+    const chunkRows = chunks.map((chunk, i) => ({
+      content: chunk,
+      embedding: embeddings[i],
+      document_id: docId,
+      topic_id: resolvedTopicId,
+    }));
+    console.log('Ingest: inserting', chunkRows.length, 'chunks with docId=', docId);
+    
+    const { error } = await supabase.from('chunks').insert(chunkRows);
     if (error) throw error;
+    console.log('Ingest: chunks inserted successfully');
 
     await fs.unlink(req.file.path);
     res.json({ success: true, documentId: docId, chunksCount: chunks.length });
@@ -601,14 +625,24 @@ app.post('/api/search', async (req, res) => {
     const retrievalCount = useAdvanced ? 25 : 5;
     const { data: chunks, error } = await supabase.rpc('match_chunks', {
       query_embedding: queryEmbedding,
-      match_threshold: 0.0,
+      match_threshold: 0.8,
       match_count: retrievalCount,
       filter_document_id: documentId,
     });
     if (error) throw error;
 
-    // Step 3: Rerank to Top 5 (if advanced mode)
+    // Keyword relevance filter for placeholder embeddings
+    const queryWords = query.toLowerCase().split(/\W+/).filter(w => w.length > 3);
     let finalChunks = chunks || [];
+    if (queryWords.length > 0) {
+      finalChunks = finalChunks.filter(chunk => {
+        const contentLower = chunk.content.toLowerCase();
+        return queryWords.some(word => contentLower.includes(word));
+      });
+      console.log(`Search keyword filter: ${chunks.length} -> ${finalChunks.length} chunks`);
+    }
+
+    // Step 3: Rerank to Top 5 (if advanced mode)
     if (useAdvanced && finalChunks.length > 5) {
       finalChunks = await rerankChunks(query, finalChunks, 5);
     } else {
@@ -641,7 +675,7 @@ app.post('/api/chat', async (req, res) => {
     const retrievalCount = useAdvanced ? 25 : 5;
     const { data: chunks, error: searchError } = await supabase.rpc('match_chunks', {
       query_embedding: queryEmbedding,
-      match_threshold: 0.0,
+      match_threshold: 0.8,
       match_count: retrievalCount,
       filter_document_id: documentId || null,
     });
@@ -651,14 +685,21 @@ app.post('/api/chat', async (req, res) => {
       console.warn('Vector search failed (schema may need migration):', searchError.message);
     }
 
+    // Keyword relevance filter: keep only chunks that share at least one meaningful word with the query
+    // This catches false positives from placeholder embeddings (deterministic hashes)
+    const queryWords = query.toLowerCase().split(/\W+/).filter(w => w.length > 3);
+    if (queryWords.length > 0) {
+      retrievedChunks = retrievedChunks.filter(chunk => {
+        const contentLower = chunk.content.toLowerCase();
+        return queryWords.some(word => contentLower.includes(word));
+      });
+      console.log(`Keyword filter: ${chunks?.length || 0} -> ${retrievedChunks.length} chunks`);
+    }
+
     // Fallback if no chunks
     if (!retrievedChunks || retrievedChunks.length === 0) {
-      let queryBuilder = supabase.from('chunks').select('content').limit(3);
-      if (documentId) queryBuilder = queryBuilder.eq('document_id', documentId);
-      const { data: fallbackChunks } = await queryBuilder;
-      if (fallbackChunks && fallbackChunks.length > 0) {
-        retrievedChunks = fallbackChunks.map(c => ({ content: c.content, similarity: 1.0 }));
-      }
+      // No relevant chunks found - skip fallback to avoid hallucination
+      retrievedChunks = [];
     }
 
     // Step 3: Rerank to Top 5 (if advanced mode)
@@ -670,8 +711,8 @@ app.post('/api/chat', async (req, res) => {
     }
 
     if (!finalChunks || finalChunks.length === 0) {
-      const systemPrompt = `You are VidyaAI, a helpful CS study teacher. Answer the student's question clearly and concisely. Use standard markdown formatting. When presenting structured data, comparisons, or components, ALWAYS format them using proper GFM markdown tables (| Col 1 | Col 2 |\n| --- | --- |). If you're unsure, say so.`;
-      const userPrompt = query;
+      const systemPrompt = `You are VidyaAI, a helpful CS study teacher. The student asked a question but NO relevant content was found in their uploaded documents. You MUST politely refuse to answer and say you don't have information about this topic in their course material. Do NOT answer from your general knowledge.`;
+      const userPrompt = `The student asked: "${query}"\n\nNo relevant course material was found in their uploaded documents.`;
       const answer = await callGroq(systemPrompt, userPrompt);
       return res.json({ answer, citations: [] });
     }
@@ -811,12 +852,25 @@ app.post('/api/quizzes/generate', async (req, res) => {
   if (!documentId) return res.status(400).json({ error: 'documentId is required' });
 
   try {
+    console.log('Quiz generation for documentId:', documentId);
+    // First check if document exists
+    const { data: doc, error: docErr } = await supabase
+      .from('documents')
+      .select('id, topic_id')
+      .eq('id', documentId)
+      .single();
+    console.log('Quiz generation: document check:', doc, docErr);
+    
     const { data: chunks, error: chunkErr } = await supabase
       .from('chunks')
-      .select('content')
+      .select('content, document_id, topic_id')
       .eq('document_id', documentId)
       .limit(20);
     if (chunkErr) throw chunkErr;
+    console.log('Chunks found:', chunks?.length || 0);
+    if (chunks && chunks.length > 0) {
+      console.log('First chunk sample:', chunks[0]);
+    }
     if (!chunks || chunks.length === 0) {
       return res.status(400).json({ error: 'No chunks found for this document. Upload and process a document first.' });
     }

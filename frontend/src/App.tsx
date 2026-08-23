@@ -561,7 +561,7 @@ function DashboardView({ navigate, quickPrompt, setQuickPrompt }: { navigate: (v
 type DocFilter = "all" | "ready" | "processing" | "error";
 type DocSort = "topic" | "date" | "name";
 
-function DocumentsView({ uploadTrigger }: { uploadTrigger?: number }) {
+function DocumentsView({ uploadTrigger, onUploadComplete }: { uploadTrigger?: number; onUploadComplete?: () => void }) {
   const [dragging, setDragging] = useState(false);
   const [docs, setDocs] = useState<ApiDocument[]>([]);
   const [topics, setTopics] = useState<ApiTopic[]>([]);
@@ -613,6 +613,7 @@ function DocumentsView({ uploadTrigger }: { uploadTrigger?: number }) {
     try {
       await uploadDocument(file, selectedTopic || undefined);
       await loadDocs();
+      onUploadComplete?.();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Upload failed");
     } finally {
@@ -817,7 +818,7 @@ function DocumentsView({ uploadTrigger }: { uploadTrigger?: number }) {
   );
 }
 
-function ChatView({ quickPrompt, clearQuickPrompt }: { quickPrompt: string; clearQuickPrompt: () => void }) {
+function ChatView({ quickPrompt, clearQuickPrompt, docVersion }: { quickPrompt: string; clearQuickPrompt: () => void; docVersion: number }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [docs, setDocs] = useState<ApiDocument[]>([]);
@@ -838,7 +839,7 @@ function ChatView({ quickPrompt, clearQuickPrompt }: { quickPrompt: string; clea
       setDocs(ready);
       if (ready.length > 0 && !selectedDoc) setSelectedDoc(ready[0].id);
     }).catch(() => {});
-  }, []);
+  }, [docVersion]);
 
   useEffect(() => {
     if (quickPrompt && !didAutoSend.current) {
@@ -1170,7 +1171,7 @@ function ChatView({ quickPrompt, clearQuickPrompt }: { quickPrompt: string; clea
   );
 }
 
-function QuizView() {
+function QuizView({ docVersion }: { docVersion: number }) {
   const [phase, setPhase] = useState<QuizPhase>("list");
   const [quizzes, setQuizzes] = useState<ApiQuiz[]>([]);
   const [selectedQuiz, setSelectedQuiz] = useState<ApiQuiz | null>(null);
@@ -1195,7 +1196,7 @@ function QuizView() {
         if (ready.length > 0) setSelectedDocId(ready[0].id);
       }),
     ]).catch(() => {}).finally(() => setLoading(false));
-  }, []);
+  }, [docVersion]);
 
   function selectOption(qi: number, answer: string) {
     if (!submitted) setSelected(prev => ({ ...prev, [qi]: answer }));
@@ -2081,6 +2082,7 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [quickPrompt, setQuickPrompt] = useState("");
   const [uploadTrigger, setUploadTrigger] = useState(0);
+  const [docVersion, setDocVersion] = useState(0);
   const [demoSeeding, setDemoSeeding] = useState(false);
   const [demoMsg, setDemoMsg] = useState("");
 
@@ -2342,9 +2344,9 @@ export default function App() {
         {/* View Content Canvas */}
         <main className="flex-1 overflow-y-auto bg-[#09090b]">
           {view === "dashboard" && <DashboardView navigate={setView} quickPrompt={quickPrompt} setQuickPrompt={setQuickPrompt} />}
-          {view === "documents" && <DocumentsView uploadTrigger={uploadTrigger} />}
-          {view === "chat" && <ChatView key={view === "chat" ? "chat" : "idle"} quickPrompt={quickPrompt} clearQuickPrompt={() => setQuickPrompt("")} />}
-          {view === "quiz" && <QuizView />}
+          {view === "documents" && <DocumentsView uploadTrigger={uploadTrigger} onUploadComplete={() => setDocVersion(v => v + 1)} />}
+          {view === "chat" && <ChatView key={view === "chat" ? "chat" : "idle"} quickPrompt={quickPrompt} clearQuickPrompt={() => setQuickPrompt("")} docVersion={docVersion} />}
+          {view === "quiz" && <QuizView docVersion={docVersion} />}
           {view === "flashcards" && <FlashcardsView navigate={setView} />}
           {view === "progress" && <ProgressView />}
           {view === "settings" && <SettingsView onClearData={() => setView("dashboard")} />}
